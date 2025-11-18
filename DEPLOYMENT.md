@@ -30,11 +30,12 @@ This guide covers deploying your Flask CTF lab to free hosting platforms.
      - **Build Command:** `cd server && pip install -r requirements.txt && python init_db.py --csv data/students_sample.csv`
      - **Start Command:** `cd server && gunicorn app:app --bind 0.0.0.0:$PORT`
      - **Root Directory:** Leave empty (or set to `server` if you prefer)
+     - **Python Version:** Render will auto-detect from `server/runtime.txt` (already included in repo)
 
 4. **Environment Variables:**
    - `FLASK_APP=app`
    - `SECRET_KEY=<generate-a-random-string>` (important for sessions)
-   - `PYTHON_VERSION=3.11`
+   - **Note:** Python version is set via `runtime.txt` (see below), not environment variable
 
 5. **Deploy:**
    - Click "Create Web Service"
