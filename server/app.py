@@ -150,19 +150,34 @@ def logout():
 @login_required
 def dashboard():
     student = current_student()
-    challenges = g.db.execute(
-        """
-        SELECT f.id,
-               f.category,
-               f.description,
-               COALESCE(s.submitted_at, '') AS submitted_at
-        FROM flags f
-        LEFT JOIN submissions s
-            ON s.flag_id = f.id AND s.student_id = ?
-        ORDER BY f.category
-        """,
-        (student["id"],),
-    ).fetchall()
+    # All flags are now in isolated tables, not in flags table
+    # Define all challenges manually (same as flag_station)
+    all_challenges = [
+        ("SQLI", "Extract the hidden data via SQL injection"),
+        ("SQLI_ADV", "Chain UNION SELECT payloads against confidential contracts"),
+        ("SQLI_BLIND", "Use boolean/blind techniques to exfiltrate secret data"),
+        ("XSS", "Pop an alert and steal the flag with stored XSS"),
+        ("CSRF", "Forge a state-changing request to grab this flag"),
+        ("STEG", "Bonus stego puzzle hidden in the site chrome."),
+    ]
+    
+    challenges = []
+    for category, description in all_challenges:
+        # Check if student has submitted this flag
+        submitted = g.db.execute(
+            "SELECT submitted_at FROM submissions WHERE student_id = ? AND category = ?",
+            (student["id"], category),
+        ).fetchone()
+        
+        challenges.append({
+            "id": None,  # No flag_id - all flags in isolated tables
+            "category": category,
+            "description": description,
+            "submitted_at": submitted["submitted_at"] if submitted else "",
+        })
+    
+    # Sort by category
+    challenges.sort(key=lambda x: x["category"])
 
     leaderboard = g.db.execute(
         """
@@ -194,6 +209,8 @@ def sqli_lab():
     raw_query = None
     error = None
     if term:
+        # VULNERABLE: Direct string concatenation - SQLI_BASIC flag is in player_secrets table
+        # Flag column: secret_token (encrypted), reward_points is dummy data
         raw_query = (
             "SELECT roll_no, display_name, points FROM leaderboard "
             f"WHERE display_name LIKE '%{term}%' ORDER BY points DESC"
@@ -223,6 +240,8 @@ def sqli_contracts():
     error = None
     raw_query = None
     if client:
+        # VULNERABLE: Direct string concatenation - SQLI_ADV flag is in client_vault table
+        # Flag column: encrypted_data (encrypted), access_level and metadata are dummy data
         raw_query = (
             "SELECT client_name, scope, budget, confidential_notes FROM contracts "
             f"WHERE client_name LIKE '%{client}%' ORDER BY budget DESC"
@@ -251,9 +270,11 @@ def sqli_blind():
     verdict = None
     success_flag = None
     if guess:
+        # VULNERABLE: Direct string concatenation - SQLI_BLIND flag is in access_keys table
+        # Flag column: auth_token (encrypted), status_code is dummy data
         raw_query = (
             "SELECT CASE WHEN EXISTS ("
-            f"SELECT 1 FROM flags WHERE category = 'SQLI_BLIND' AND code = '{guess}'"
+            f"SELECT 1 FROM access_keys WHERE auth_token = '{guess}'"
             ") THEN 'ACCESS GRANTED' ELSE 'ACCESS DENIED' END AS verdict"
         )
         try:
@@ -262,8 +283,8 @@ def sqli_blind():
             verdict = "ACCESS DENIED"
         if verdict == "ACCESS GRANTED":
             encrypted_flag = g.db.execute(
-                "SELECT code FROM flags WHERE category = 'SQLI_BLIND'"
-            ).fetchone()["code"]
+                "SELECT auth_token FROM access_keys WHERE status_code = 200 LIMIT 1"
+            ).fetchone()["auth_token"]
             success_flag = decrypt_flag(encrypted_flag)
     return render_template(
         "sqli_blind.html",
@@ -301,7 +322,10 @@ def xss_lab():
         ORDER BY feedback.created_at DESC
         """
     ).fetchall()
-    encrypted_xss_flag = g.db.execute("SELECT code FROM flags WHERE category = 'XSS'").fetchone()["code"]
+    # Get XSS flag from message_vault table (hidden_content column)
+    encrypted_xss_flag = g.db.execute(
+        "SELECT hidden_content FROM message_vault WHERE priority_level = 9 LIMIT 1"
+    ).fetchone()["hidden_content"]
     xss_flag = decrypt_flag(encrypted_xss_flag)
     return render_template(
         "xss.html",
@@ -315,7 +339,10 @@ def xss_lab():
 @login_required
 def csrf_lab():
     student = current_student()
-    encrypted_csrf_flag = g.db.execute("SELECT code FROM flags WHERE category = 'CSRF'").fetchone()["code"]
+    # Get CSRF flag from session_tokens table (session_data column)
+    encrypted_csrf_flag = g.db.execute(
+        "SELECT session_data FROM session_tokens WHERE token_status = 1 LIMIT 1"
+    ).fetchone()["session_data"]
     csrf_flag = decrypt_flag(encrypted_csrf_flag)
     return render_template("csrf.html", student=student, csrf_flag=csrf_flag)
 
@@ -342,19 +369,34 @@ def update_email():
 @login_required
 def flag_station():
     student = current_student()
-    challenge_rows = g.db.execute(
-        """
-        SELECT f.id,
-               f.category,
-               f.description,
-               COALESCE(s.submitted_at, '') AS submitted_at
-        FROM flags f
-        LEFT JOIN submissions s
-            ON s.flag_id = f.id AND s.student_id = ?
-        ORDER BY f.category
-        """,
-        (student["id"],),
-    ).fetchall()
+    # All flags are now in isolated tables, not in flags table
+    # Define all challenges manually
+    all_challenges = [
+        ("SQLI", "Extract the hidden data via SQL injection"),
+        ("SQLI_ADV", "Chain UNION SELECT payloads against confidential contracts"),
+        ("SQLI_BLIND", "Use boolean/blind techniques to exfiltrate secret data"),
+        ("XSS", "Pop an alert and steal the flag with stored XSS"),
+        ("CSRF", "Forge a state-changing request to grab this flag"),
+        ("STEG", "Bonus stego puzzle hidden in the site chrome."),
+    ]
+    
+    challenge_rows = []
+    for category, description in all_challenges:
+        # Check if student has submitted this flag
+        submitted = g.db.execute(
+            "SELECT submitted_at FROM submissions WHERE student_id = ? AND category = ?",
+            (student["id"], category),
+        ).fetchone()
+        
+        challenge_rows.append({
+            "id": None,  # No flag_id - all flags in isolated tables
+            "category": category,
+            "description": description,
+            "submitted_at": submitted["submitted_at"] if submitted else "",
+        })
+    
+    # Sort by category
+    challenge_rows.sort(key=lambda x: x["category"])
     return render_template("flags.html", student=student, challenges=challenge_rows)
 
 
@@ -368,39 +410,106 @@ def bonus():
 @login_required
 def submit_flag():
     student = current_student()
-    category = request.form.get("category", "").upper()
+    category = request.form.get("category", "").upper().strip()
     submitted_flag = request.form.get("flag", "").strip()
 
     if not submitted_flag:
         flash("Enter a flag value.", "warning")
         return redirect(url_for("flag_station"))
-
-    flag = g.db.execute(
-        "SELECT id, code, code_hash, category FROM flags WHERE category = ?", (category,)
-    ).fetchone()
-    if not flag:
-        flash("Unknown challenge category.", "danger")
+    
+    if not category:
+        flash("Invalid challenge category.", "danger")
         return redirect(url_for("flag_station"))
 
+    # Check flag in appropriate table based on category
     submitted_hash = hash_flag(submitted_flag)
-    if submitted_hash != flag["code_hash"]:
+    is_valid = False
+    flag_category = category
+    flag_id = None  # Will be set for non-SQLi challenges
+    
+    try:
+        if category == "SQLI":
+            # Check player_secrets table (secret_token column)
+            result = g.db.execute(
+                "SELECT secret_token FROM player_secrets WHERE reward_points = 999 LIMIT 1"
+            ).fetchone()
+            if result:
+                decrypted = decrypt_flag(result["secret_token"])
+                if hash_flag(decrypted) == submitted_hash:
+                    is_valid = True
+        elif category == "SQLI_ADV":
+            # Check client_vault table (encrypted_data column)
+            result = g.db.execute(
+                "SELECT encrypted_data FROM client_vault WHERE access_level = 7 LIMIT 1"
+            ).fetchone()
+            if result:
+                decrypted = decrypt_flag(result["encrypted_data"])
+                if hash_flag(decrypted) == submitted_hash:
+                    is_valid = True
+        elif category == "SQLI_BLIND":
+            # Check access_keys table (auth_token column)
+            result = g.db.execute(
+                "SELECT auth_token FROM access_keys WHERE status_code = 200 LIMIT 1"
+            ).fetchone()
+            if result:
+                decrypted = decrypt_flag(result["auth_token"])
+                if hash_flag(decrypted) == submitted_hash:
+                    is_valid = True
+        elif category == "XSS":
+            # Check message_vault table (hidden_content column)
+            result = g.db.execute(
+                "SELECT hidden_content FROM message_vault WHERE priority_level = 9 LIMIT 1"
+            ).fetchone()
+            if result:
+                decrypted = decrypt_flag(result["hidden_content"])
+                if hash_flag(decrypted) == submitted_hash:
+                    is_valid = True
+        elif category == "CSRF":
+            # Check session_tokens table (session_data column)
+            result = g.db.execute(
+                "SELECT session_data FROM session_tokens WHERE token_status = 1 LIMIT 1"
+            ).fetchone()
+            if result:
+                decrypted = decrypt_flag(result["session_data"])
+                if hash_flag(decrypted) == submitted_hash:
+                    is_valid = True
+        elif category == "STEG":
+            # Check image_metadata table (embedded_data column)
+            result = g.db.execute(
+                "SELECT embedded_data FROM image_metadata WHERE image_type = 1 LIMIT 1"
+            ).fetchone()
+            if result:
+                decrypted = decrypt_flag(result["embedded_data"])
+                if hash_flag(decrypted) == submitted_hash:
+                    is_valid = True
+        else:
+            flash(f"Unknown challenge category: {category}", "danger")
+            return redirect(url_for("flag_station"))
+    except Exception as e:
+        flash(f"Error validating flag: {str(e)}", "danger")
+        return redirect(url_for("flag_station"))
+
+    if not is_valid:
         flash("Incorrect flag. Keep digging!", "danger")
         return redirect(url_for("flag_station"))
 
+    # Calculate points - all challenges now use category for tracking
     existing = g.db.execute(
-        "SELECT COUNT(*) AS total FROM submissions WHERE flag_id = ?",
-        (flag["id"],),
+        "SELECT COUNT(*) AS total FROM submissions WHERE category = ?",
+        (category,),
     ).fetchone()["total"]
+    
     points = max(
         MIN_POINTS,
-        FLAG_BASE_POINTS.get(flag["category"], 80) - existing * POINT_DECAY,
+        FLAG_BASE_POINTS.get(flag_category, 80) - existing * POINT_DECAY,
     )
 
     try:
         with g.db:
+            # All submissions now use category (no flag_id needed)
             g.db.execute(
-                "INSERT INTO submissions (student_id, flag_id, points) VALUES (?, ?, ?)",
-                (student["id"], flag["id"], points),
+                "INSERT INTO submissions (student_id, category, points) VALUES (?, ?, ?)",
+                (student["id"], category, points),
             )
             g.db.execute(
                 """
@@ -412,7 +521,7 @@ def submit_flag():
                 """,
                 (student["id"], points, 1),
             )
-        flash(f"Flag captured for {category}! +{points} pts", "success")
+        flash(f"Flag captured for {flag_category}! +{points} pts", "success")
     except Exception:  # noqa: BLE001
         flash("Flag already submitted.", "info")
 
@@ -472,12 +581,11 @@ def admin_panel():
         """
         SELECT students.roll_no,
                students.name,
-               flags.category,
+               submissions.category,
                submissions.points,
                submissions.submitted_at
         FROM submissions
         JOIN students ON students.id = submissions.student_id
-        JOIN flags ON flags.id = submissions.flag_id
         ORDER BY submissions.submitted_at DESC
         LIMIT 15
         """

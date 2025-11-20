@@ -64,16 +64,74 @@ def bootstrap_schema(conn):
                 description TEXT
             );
 
+            -- Separate table for SQLI_BASIC challenge (isolated from others)
+            CREATE TABLE IF NOT EXISTS player_secrets (
+                player_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                secret_token TEXT NOT NULL,
+                reward_points INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- Separate table for SQLI_ADV challenge (isolated from others)
+            CREATE TABLE IF NOT EXISTS client_vault (
+                vault_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                encrypted_data TEXT NOT NULL,
+                access_level INTEGER DEFAULT 0,
+                metadata TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- Separate table for SQLI_BLIND challenge (isolated from others)
+            CREATE TABLE IF NOT EXISTS access_keys (
+                key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                auth_token TEXT NOT NULL,
+                status_code INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- Separate table for XSS challenge (isolated from others)
+            CREATE TABLE IF NOT EXISTS message_vault (
+                message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hidden_content TEXT NOT NULL,
+                priority_level INTEGER DEFAULT 0,
+                message_type TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- Separate table for CSRF challenge (isolated from others)
+            CREATE TABLE IF NOT EXISTS session_tokens (
+                token_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_data TEXT NOT NULL,
+                token_status INTEGER DEFAULT 0,
+                token_type TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- Separate table for STEG challenge (isolated from others)
+            CREATE TABLE IF NOT EXISTS image_metadata (
+                image_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                embedded_data TEXT NOT NULL,
+                image_type INTEGER DEFAULT 0,
+                metadata_info TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS submissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
-                flag_id INTEGER NOT NULL,
+                flag_id INTEGER,
+                category TEXT,
                 submitted_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 points INTEGER DEFAULT 0,
-                UNIQUE(student_id, flag_id),
                 FOREIGN KEY(student_id) REFERENCES students(id),
                 FOREIGN KEY(flag_id) REFERENCES flags(id)
             );
+            
+            -- Create unique indexes for preventing duplicate submissions
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_flag 
+                ON submissions(student_id, flag_id) WHERE flag_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_category 
+                ON submissions(student_id, category) WHERE category IS NOT NULL;
 
             CREATE TABLE IF NOT EXISTS feedback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,23 +180,213 @@ def ensure_flag_hash_column(conn):
 
 
 def seed_flags(conn):
+    """Flags table is now empty - all flags are in isolated tables.
+    This function is kept for backward compatibility but doesn't seed anything.
+    """
     ensure_flag_hash_column(conn)
+    # All flags are now in isolated tables, not in flags table
+    pass
+
+
+def seed_sqli_basic_flag(conn):
+    """Seed SQLI_BASIC flag into isolated player_secrets table."""
     if not PLAINTEXT_FLAGS:
-        print("No plaintext flags found (flag_payloads missing). Skipping flag seeding.")
         return
-    with conn:
-        for category, code, description in PLAINTEXT_FLAGS:
+    sqli_flag = next((f for f in PLAINTEXT_FLAGS if f[0] == "SQLI"), None)
+    if sqli_flag:
+        _, code, _ = sqli_flag
+        with conn:
+            # Clear and insert flag with dummy data to confuse sqlmap
+            conn.execute("DELETE FROM player_secrets")
             conn.execute(
                 """
-                INSERT INTO flags (category, code, code_hash, description)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(category) DO UPDATE SET
-                    code=excluded.code,
-                    code_hash=excluded.code_hash,
-                    description=excluded.description
+                INSERT INTO player_secrets (secret_token, reward_points)
+                VALUES (?, ?)
                 """,
-                (category, encrypt_flag(code), hash_flag(code), description),
+                (encrypt_flag(code), 999),
             )
+            # Add realistic dummy flags to confuse students and automated tools
+            dummy_flags = [
+                "FLAG{Trust_me_its_ture_1}",
+                "FLAG{Trust_me_its_ture_2}",
+                "FLAG{Trust_me_its_false_1}",
+                "FLAG{Trust_me_its_false_2}",
+                "FLAG{This_is_not_the_flag}",
+            ]
+            for i, dummy_flag in enumerate(dummy_flags):
+                conn.execute(
+                    """
+                    INSERT INTO player_secrets (secret_token, reward_points)
+                    VALUES (?, ?)
+                    """,
+                    (encrypt_flag(dummy_flag), 100 + i),
+                )
+
+
+def seed_sqli_adv_flag(conn):
+    """Seed SQLI_ADV flag into isolated client_vault table."""
+    if not PLAINTEXT_FLAGS:
+        return
+    sqli_adv_flag = next((f for f in PLAINTEXT_FLAGS if f[0] == "SQLI_ADV"), None)
+    if sqli_adv_flag:
+        _, code, _ = sqli_adv_flag
+        with conn:
+            # Clear and insert flag with dummy data
+            conn.execute("DELETE FROM client_vault")
+            conn.execute(
+                """
+                INSERT INTO client_vault (encrypted_data, access_level, metadata)
+                VALUES (?, ?, ?)
+                """,
+                (encrypt_flag(code), 7, "classified"),
+            )
+            # Add realistic dummy flags to confuse students and automated tools
+            dummy_flags = [
+                "FLAG{Trust_me_its_ture_3}",
+                "FLAG{Trust_me_its_false_3}",
+                "FLAG{Not_the_real_flag_here}",
+                "FLAG{Keep_looking_elsewhere}",
+            ]
+            for i, dummy_flag in enumerate(dummy_flags):
+                conn.execute(
+                    """
+                    INSERT INTO client_vault (encrypted_data, access_level, metadata)
+                    VALUES (?, ?, ?)
+                    """,
+                    (encrypt_flag(dummy_flag), 5, "public"),
+                )
+
+
+def seed_sqli_blind_flag(conn):
+    """Seed SQLI_BLIND flag into isolated access_keys table."""
+    if not PLAINTEXT_FLAGS:
+        return
+    sqli_blind_flag = next((f for f in PLAINTEXT_FLAGS if f[0] == "SQLI_BLIND"), None)
+    if sqli_blind_flag:
+        _, code, _ = sqli_blind_flag
+        with conn:
+            # Clear and insert flag
+            conn.execute("DELETE FROM access_keys")
+            conn.execute(
+                """
+                INSERT INTO access_keys (auth_token, status_code)
+                VALUES (?, ?)
+                """,
+                (encrypt_flag(code), 200),
+            )
+            # Add realistic dummy flags to confuse students and automated tools
+            dummy_flags = [
+                "FLAG{Trust_me_its_ture_4}",
+                "FLAG{Trust_me_its_ture_5}",
+                "FLAG{Trust_me_its_false_4}",
+                "FLAG{Trust_me_its_false_5}",
+                "FLAG{Wrong_flag_try_again}",
+                "FLAG{This_wont_work_here}",
+            ]
+            for i, dummy_flag in enumerate(dummy_flags):
+                conn.execute(
+                    """
+                    INSERT INTO access_keys (auth_token, status_code)
+                    VALUES (?, ?)
+                    """,
+                    (encrypt_flag(dummy_flag), 403),
+                )
+
+
+def seed_xss_flag(conn):
+    """Seed XSS flag into isolated message_vault table."""
+    if not PLAINTEXT_FLAGS:
+        return
+    xss_flag = next((f for f in PLAINTEXT_FLAGS if f[0] == "XSS"), None)
+    if xss_flag:
+        _, code, _ = xss_flag
+        with conn:
+            conn.execute("DELETE FROM message_vault")
+            conn.execute(
+                """
+                INSERT INTO message_vault (hidden_content, priority_level, message_type)
+                VALUES (?, ?, ?)
+                """,
+                (encrypt_flag(code), 9, "critical"),
+            )
+            # Add dummy flags
+            dummy_flags = [
+                "FLAG{Trust_me_its_ture_6}",
+                "FLAG{Trust_me_its_false_6}",
+                "FLAG{Not_the_xss_flag}",
+            ]
+            for dummy_flag in dummy_flags:
+                conn.execute(
+                    """
+                    INSERT INTO message_vault (hidden_content, priority_level, message_type)
+                    VALUES (?, ?, ?)
+                    """,
+                    (encrypt_flag(dummy_flag), 5, "normal"),
+                )
+
+
+def seed_csrf_flag(conn):
+    """Seed CSRF flag into isolated session_tokens table."""
+    if not PLAINTEXT_FLAGS:
+        return
+    csrf_flag = next((f for f in PLAINTEXT_FLAGS if f[0] == "CSRF"), None)
+    if csrf_flag:
+        _, code, _ = csrf_flag
+        with conn:
+            conn.execute("DELETE FROM session_tokens")
+            conn.execute(
+                """
+                INSERT INTO session_tokens (session_data, token_status, token_type)
+                VALUES (?, ?, ?)
+                """,
+                (encrypt_flag(code), 1, "active"),
+            )
+            # Add dummy flags
+            dummy_flags = [
+                "FLAG{Trust_me_its_ture_7}",
+                "FLAG{Trust_me_its_false_7}",
+                "FLAG{Not_the_csrf_flag}",
+            ]
+            for dummy_flag in dummy_flags:
+                conn.execute(
+                    """
+                    INSERT INTO session_tokens (session_data, token_status, token_type)
+                    VALUES (?, ?, ?)
+                    """,
+                    (encrypt_flag(dummy_flag), 0, "inactive"),
+                )
+
+
+def seed_steg_flag(conn):
+    """Seed STEG flag into isolated image_metadata table."""
+    if not PLAINTEXT_FLAGS:
+        return
+    steg_flag = next((f for f in PLAINTEXT_FLAGS if f[0] == "STEG"), None)
+    if steg_flag:
+        _, code, _ = steg_flag
+        with conn:
+            conn.execute("DELETE FROM image_metadata")
+            conn.execute(
+                """
+                INSERT INTO image_metadata (embedded_data, image_type, metadata_info)
+                VALUES (?, ?, ?)
+                """,
+                (encrypt_flag(code), 1, "hidden"),
+            )
+            # Add dummy flags
+            dummy_flags = [
+                "FLAG{Trust_me_its_ture_8}",
+                "FLAG{Trust_me_its_false_8}",
+                "FLAG{Not_the_steg_flag}",
+            ]
+            for dummy_flag in dummy_flags:
+                conn.execute(
+                    """
+                    INSERT INTO image_metadata (embedded_data, image_type, metadata_info)
+                    VALUES (?, ?, ?)
+                    """,
+                    (encrypt_flag(dummy_flag), 0, "visible"),
+                )
 
 
 def seed_leaderboard(conn):
@@ -287,7 +535,13 @@ def main():
 
     conn = get_connection()
     bootstrap_schema(conn)
-    seed_flags(conn)
+    seed_flags(conn)  # Empty now - all flags in isolated tables
+    seed_sqli_basic_flag(conn)  # SQLI_BASIC into player_secrets
+    seed_sqli_adv_flag(conn)  # SQLI_ADV into client_vault
+    seed_sqli_blind_flag(conn)  # SQLI_BLIND into access_keys
+    seed_xss_flag(conn)  # XSS into message_vault
+    seed_csrf_flag(conn)  # CSRF into session_tokens
+    seed_steg_flag(conn)  # STEG into image_metadata
     seed_leaderboard(conn)
     seed_contracts(conn)
     seed_shipments(conn)
