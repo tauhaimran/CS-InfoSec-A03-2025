@@ -49,7 +49,7 @@ start exploiting the labs. Flags use the `FLAG{...}` format and are submitted
 on the “Submit Flags” page inside the app.
 
 ### Seeding Real Students
-
+You can use already created user: SEC23001 password: compass123
 Provide your class roster as a CSV with columns:
 
 ```
