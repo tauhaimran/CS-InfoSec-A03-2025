@@ -1,0 +1,15 @@
+first time:
+cd server
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+python init_db.py --csv data/students_sample.csv
+
+
+for everytime:
+cd server
+python -m venv .venv
+.\.venv\Scripts\activate
+
+to start app:
+ flask --app app run --debug
