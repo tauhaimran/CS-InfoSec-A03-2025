@@ -13,3 +13,5 @@ python -m venv .venv
 
 to start app:
  flask --app app run --debug
+ OR
+ python app.py
